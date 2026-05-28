@@ -8,6 +8,7 @@ import {
   deleteHelpVideo,
   deletePlan,
   deleteUser,
+  getAdminBilling,
   getDashboard,
   getCompanySettings,
   getUserById,
@@ -63,6 +64,20 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     if (endpoint === "/admin/dashboard") {
       return NextResponse.json(await getDashboard());
+    }
+
+    if (endpoint === "/admin/billing") {
+      try {
+        return NextResponse.json(
+          await getAdminBilling({
+            periodDays: request.nextUrl.searchParams.get("periodDays"),
+            renewalWindowDays: request.nextUrl.searchParams.get("renewalWindowDays"),
+            planId: request.nextUrl.searchParams.get("planId"),
+          }),
+        );
+      } catch (error) {
+        return jsonError(error, 400);
+      }
     }
 
     if (endpoint === "/admin/plans") {

@@ -34,6 +34,7 @@ body {
   color: var(--foreground);
   transition: background-color 0.3s ease, color 0.3s ease;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 :root {
@@ -45,6 +46,7 @@ body {
   max-width: var(--container-max);
   margin: 0 auto;
   padding: clamp(1rem, 2vw, 2rem);
+  overflow-wrap: anywhere;
 }
 
 .responsive-copy {

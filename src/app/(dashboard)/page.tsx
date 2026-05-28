@@ -1,210 +1,131 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  Users,
-  Gem,
-  TrendingUp,
-  ChevronRight,
-  MoreHorizontal,
-  Loader2,
-} from "lucide-react";
-import Link from "next/link";
-import { fetchApi } from "@/lib/api/client";
-import { mapUserToListItem, type User, type UserListItem } from "@/lib/subscriptions";
-import { ResponsiveContainer } from "@/components/layout/responsive-container";
+import { Loader2, RefreshCw } from "lucide-react";
 
-interface DashboardData {
-  metrics: {
-    totalUsers: number;
-    activeUsers: number;
-    newUsers24h: number;
-    estimatedRevenue: number;
-  };
-  plans: Array<{
-    name: string;
-    count: number;
-    revenue: number;
-  }>;
-  recentActivity: Array<{
-    id: string;
-    action: string;
-    details: string;
-    userName: string;
-    createdAt: string;
-  }>;
+import {
+  DashboardOperationalQueue,
+  DashboardPlanDistribution,
+  DashboardRecentEvents,
+  DashboardSectionError,
+  DashboardSummaryCards,
+} from "@/components/dashboard";
+import { ResponsiveContainer } from "@/components/layout/responsive-container";
+import { fetchApi } from "@/lib/api/client";
+import type { DashboardOperacional, DashboardSectionState } from "@/lib/dashboard";
+
+function findSectionState(
+  states: DashboardSectionState[],
+  section: DashboardSectionState["section"],
+) {
+  return states.find((state) => state.section === section);
 }
 
 export default function Home() {
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [data, setData] = useState<DashboardOperacional | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [recentUsers, setRecentUsers] = useState<UserListItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let mounted = true;
+
     async function loadDashboard() {
+      setIsLoading(true);
+      setError(null);
+
       try {
-        const [dashData, usersResponse] = await Promise.all([
-          fetchApi("/admin/dashboard").catch(() => ({
-            metrics: { totalUsers: 0, activeUsers: 0, newUsers24h: 0, estimatedRevenue: 0 },
-            plans: [],
-            recentActivity: [],
-          })),
-          fetchApi("/user"),
-        ]);
-
-        setData(dashData);
-
-        const usersList = Array.isArray(usersResponse) ? usersResponse : usersResponse.data || [];
-        setRecentUsers(usersList.slice(0, 5).map((user: User) => mapUserToListItem(user)));
-      } catch (error) {
-        console.error("Erro ao carregar dashboard:", error);
+        const dashboard = (await fetchApi("/admin/dashboard")) as DashboardOperacional;
+        if (mounted) {
+          setData(dashboard);
+        }
+      } catch (err) {
+        if (mounted) {
+          setError(err instanceof Error ? err.message : "Erro ao carregar dashboard operacional.");
+        }
       } finally {
-        setIsLoading(false);
+        if (mounted) {
+          setIsLoading(false);
+        }
       }
     }
 
-    loadDashboard();
+    void loadDashboard();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
-        <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-10 w-10 animate-spin text-indigo-600" />
+          <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
+            Montando dashboard operacional...
+          </p>
+        </div>
       </div>
     );
   }
 
+  if (error || !data) {
+    return (
+      <ResponsiveContainer>
+        <DashboardSectionError
+          title="Dashboard indisponivel"
+          message={error ?? "Nao foi possivel carregar os dados operacionais agora."}
+        />
+      </ResponsiveContainer>
+    );
+  }
+
+  const generatedAt = new Date(data.generatedAt).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
   return (
     <ResponsiveContainer>
-    <div className="space-y-8 animate-fade-in-up">
-      <div className="responsive-grid-cards">
-        <div className="p-6 bg-[var(--card)] rounded-3xl border border-[var(--border)] shadow-sm hover:shadow-md transition-all group">
-          <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-            <Users className="h-6 w-6" />
+      <div className="space-y-6 animate-fade-in-up">
+        <section className="flex flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">
+              Painel operacional
+            </p>
+            <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">
+              Saude do negocio em tempo de decisao
+            </h1>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+              Usuarios, assinaturas, receita estimada e proximas acoes em uma leitura unica.
+            </p>
           </div>
-          <p className="text-sm font-medium text-slate-400 dark:text-slate-500">Total de Usuários</p>
-          <div className="flex items-end gap-2 mt-1">
-            <h3 className="text-2xl font-bold">{data.metrics.totalUsers.toLocaleString()}</h3>
-            <span className="text-xs font-bold text-emerald-500 pb-1">+{data.metrics.newUsers24h} hoje</span>
+          <div className="flex shrink-0 items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+            <RefreshCw className="h-4 w-4" />
+            Atualizado em {generatedAt}
           </div>
+        </section>
+
+        <DashboardSummaryCards
+          metrics={data.summary}
+          state={findSectionState(data.sectionStates, "summary")}
+        />
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(22rem,0.9fr)]">
+          <DashboardPlanDistribution
+            items={data.planDistribution}
+            state={findSectionState(data.sectionStates, "planDistribution")}
+          />
+          <DashboardOperationalQueue items={data.operationalQueue} />
         </div>
 
-        <div className="p-6 bg-[var(--card)] rounded-3xl border border-[var(--border)] shadow-sm hover:shadow-md transition-all group">
-          <div className="w-12 h-12 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-            <Gem className="h-6 w-6" />
-          </div>
-          <p className="text-sm font-medium text-slate-400 dark:text-slate-500">Usuários Ativos</p>
-          <div className="flex items-end gap-2 mt-1">
-            <h3 className="text-2xl font-bold">{data.metrics.activeUsers.toLocaleString()}</h3>
-            <span className="text-xs font-bold text-emerald-500 pb-1">
-              {data.metrics.totalUsers > 0
-                ? ((data.metrics.activeUsers / data.metrics.totalUsers) * 100).toFixed(0)
-                : 0}
-              % da base
-            </span>
-          </div>
-        </div>
-
-        <div className="p-6 bg-[var(--card)] rounded-3xl border border-[var(--border)] shadow-sm hover:shadow-md transition-all group">
-          <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-            <TrendingUp className="h-6 w-6" />
-          </div>
-          <p className="text-sm font-medium text-slate-400 dark:text-slate-500">Receita Estimada</p>
-          <div className="flex items-end gap-2 mt-1">
-            <h3 className="text-2xl font-bold">
-              {data.metrics.estimatedRevenue.toLocaleString("pt-BR", {
-                style: "currency",
-                currency: "BRL",
-              })}
-            </h3>
-            <span className="text-xs font-bold text-slate-400 dark:text-slate-500 pb-1">MRR Atual</span>
-          </div>
-        </div>
+        <DashboardRecentEvents
+          events={data.recentEvents}
+          state={findSectionState(data.sectionStates, "recentEvents")}
+        />
       </div>
-
-      <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] shadow-sm overflow-hidden transition-colors duration-300">
-        <div className="p-4 sm:p-6 lg:p-8 border-b border-[var(--border)] flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="text-lg font-bold">Últimos Usuários Cadastrados</h3>
-          <Link
-            href="/users"
-            className="text-sm font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-1 group"
-          >
-            Ver todos os usuários{" "}
-            <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
-          </Link>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-slate-50/50 dark:bg-slate-800/30">
-                <th className="px-4 sm:px-6 lg:px-8 py-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
-                  Usuário
-                </th>
-                <th className="px-4 sm:px-6 lg:px-8 py-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
-                  Plano
-                </th>
-                <th className="px-4 sm:px-6 lg:px-8 py-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
-                  Status
-                </th>
-                <th className="px-4 sm:px-6 lg:px-8 py-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest text-right">
-                  Ações
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {recentUsers.map((user) => (
-                <tr key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                  <td className="px-4 sm:px-6 lg:px-8 py-5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-xs font-bold text-indigo-600 dark:text-indigo-400">
-                        {user.name
-                          .split(" ")
-                          .map((name) => name[0])
-                          .join("")
-                          .slice(0, 2)
-                          .toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold">{user.name}</p>
-                        <p className="text-xs text-slate-400 dark:text-slate-500">{user.email}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 sm:px-6 lg:px-8 py-5">
-                    <span
-                      className={`px-3 py-1 text-[10px] font-bold rounded-full uppercase ${
-                        user.activePlan
-                          ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400"
-                          : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
-                      }`}
-                    >
-                      {user.activePlan?.name || "Sem Plano"}
-                    </span>
-                  </td>
-                  <td className="px-4 sm:px-6 lg:px-8 py-5">
-                    <div className="flex items-center gap-1.5">
-                      <div className={`w-1.5 h-1.5 rounded-full ${user.isActive ? "bg-emerald-500" : "bg-red-500"}`}></div>
-                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                        {user.isActive ? "Ativo" : "Inativo"}
-                        {user.subscriptionStatus ? ` • ${user.subscriptionStatus}` : ""}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 sm:px-6 lg:px-8 py-5 text-right">
-                    <Link
-                      href={`/users/${user.id}`}
-                      className="p-2 inline-block hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 dark:text-slate-600 transition-colors"
-                    >
-                      <MoreHorizontal className="h-5 w-5" />
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
     </ResponsiveContainer>
   );
 }

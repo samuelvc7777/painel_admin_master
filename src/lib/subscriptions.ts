@@ -21,6 +21,11 @@ export interface Subscription {
   endDate: string;
   canceledAt: string | null;
   autoRenew: boolean;
+  googlePlayProductId?: string | null;
+  googlePlayPurchaseToken?: string | null;
+  googlePlayOrderId?: string | null;
+  googlePlayLinkedAt?: string | null;
+  googlePlayExpiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
   plan: Plan;
