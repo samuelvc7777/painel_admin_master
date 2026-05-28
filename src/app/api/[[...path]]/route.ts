@@ -11,6 +11,7 @@ import {
   getDashboard,
   getCompanySettings,
   getUserById,
+  listAdminNotifications,
   listHelpVideos,
   listPlans,
   listUsers,
@@ -73,6 +74,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
     if (endpoint === "/admin/company-settings") {
       return NextResponse.json(await getCompanySettings());
+    }
+
+    if (endpoint === "/admin/notifications") {
+      const limit = Number(request.nextUrl.searchParams.get("limit") ?? 20);
+      return NextResponse.json(await listAdminNotifications({ limit }));
     }
 
     const userMatch = endpoint.match(/^\/user\/(\d+)$/);
@@ -146,6 +152,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (helpVideoMatch) {
       return NextResponse.json(await updateHelpVideo(Number(helpVideoMatch[1]), payload as Partial<HelpVideo>));
     }
+
     if (endpoint === "/admin/company-settings") {
       const rawGoogleApiKey = String(payload.googleApiKey ?? "");
       const googleApiKey = rawGoogleApiKey.trim();

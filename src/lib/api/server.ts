@@ -1,5 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 
+import type {
+  AdminNotification,
+  AdminNotificationsResponse,
+  AdminNotificationType,
+} from "@/lib/notifications";
 import type { HelpVideo, Plan, Subscription, User } from "@/lib/subscriptions";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -311,6 +316,142 @@ export async function updatePlan(id: number, payload: Partial<Plan>) {
 
 function normalizePlanCode(code: string | undefined) {
   return code?.trim().toLowerCase() ?? '';
+}
+
+function buildSubscriptionNotification(
+  type: Extract<
+    AdminNotificationType,
+    "SUBSCRIPTION_CREATED" | "SUBSCRIPTION_RENEWED" | "SUBSCRIPTION_CANCELED"
+  >,
+  user: User,
+  subscription: Pick<Subscription, "id">,
+  plan: Pick<Plan, "name">,
+  occurredAt: string,
+): AdminNotification {
+  const titleByType = {
+    SUBSCRIPTION_CREATED: "Nova assinatura",
+    SUBSCRIPTION_RENEWED: "Assinatura renovada",
+    SUBSCRIPTION_CANCELED: "Assinatura cancelada",
+  } satisfies Record<typeof type, string>;
+
+  const messageByType = {
+    SUBSCRIPTION_CREATED: `${user.name} assinou o plano ${plan.name}.`,
+    SUBSCRIPTION_RENEWED: `${user.name} renovou o plano ${plan.name}.`,
+    SUBSCRIPTION_CANCELED: `${user.name} cancelou o plano ${plan.name}.`,
+  } satisfies Record<typeof type, string>;
+
+  return {
+    id: `${type.toLowerCase()}:${subscription.id}:${occurredAt}`,
+    type,
+    title: titleByType[type],
+    message: messageByType[type],
+    eventKey: `${type.toLowerCase()}:${subscription.id}:${occurredAt}`,
+    relatedUserId: user.id,
+    relatedSubscriptionId: subscription.id,
+    relatedPlanName: plan.name,
+    actorName: user.name,
+    actorEmail: user.email,
+    occurredAt,
+    readAt: null,
+    createdAt: occurredAt,
+  };
+}
+
+function buildUserCreatedNotification(user: User): AdminNotification {
+  return {
+    id: `user-created:${user.id}`,
+    type: "USER_CREATED",
+    title: "Novo usuario cadastrado",
+    message: `${user.name} foi cadastrado no painel.`,
+    eventKey: `user-created:${user.id}`,
+    relatedUserId: user.id,
+    relatedSubscriptionId: null,
+    relatedPlanName: null,
+    actorName: user.name,
+    actorEmail: user.email,
+    occurredAt: user.createdAt,
+    readAt: null,
+    createdAt: user.createdAt,
+  };
+}
+
+function isReplacementCancellation(subscription: Subscription, subscriptions: Subscription[]) {
+  if (!subscription.canceledAt) {
+    return false;
+  }
+
+  const canceledAt = new Date(subscription.canceledAt).getTime();
+  const replacementWindowMs = 5 * 60 * 1000;
+
+  return subscriptions.some((candidate) => {
+    if (candidate.id === subscription.id) {
+      return false;
+    }
+
+    const createdAt = new Date(candidate.createdAt).getTime();
+    const startDate = new Date(candidate.startDate).getTime();
+    const replacementTime = Math.min(createdAt, startDate);
+
+    return replacementTime >= canceledAt && replacementTime - canceledAt <= replacementWindowMs;
+  });
+}
+
+export async function listAdminNotifications(options: { limit?: number } = {}): Promise<AdminNotificationsResponse> {
+  const limit = Math.min(Math.max(Number(options.limit ?? 20), 1), 50);
+  const users = await listUsers();
+  const notifications = users.flatMap((user) => {
+    const userNotifications: AdminNotification[] = [buildUserCreatedNotification(user)];
+
+    for (const subscription of user.subscriptions) {
+      userNotifications.push(
+        buildSubscriptionNotification(
+          "SUBSCRIPTION_CREATED",
+          user,
+          subscription,
+          subscription.plan,
+          subscription.createdAt,
+        ),
+      );
+
+      if (subscription.canceledAt && !isReplacementCancellation(subscription, user.subscriptions)) {
+        userNotifications.push(
+          buildSubscriptionNotification(
+            "SUBSCRIPTION_CANCELED",
+            user,
+            subscription,
+            subscription.plan,
+            subscription.canceledAt,
+          ),
+        );
+      }
+
+      if (
+        ["ACTIVE", "TRIAL"].includes(subscription.status.toUpperCase()) &&
+        subscription.updatedAt !== subscription.createdAt &&
+        Math.abs(new Date(subscription.updatedAt).getTime() - new Date(subscription.startDate).getTime()) < 60_000
+      ) {
+        userNotifications.push(
+          buildSubscriptionNotification(
+            "SUBSCRIPTION_RENEWED",
+            user,
+            subscription,
+            subscription.plan,
+            subscription.updatedAt,
+          ),
+        );
+      }
+    }
+
+    return userNotifications;
+  });
+
+  const items = notifications
+    .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime())
+    .slice(0, limit);
+
+  return {
+    items,
+  };
 }
 
 function mapHelpVideo(row: HelpVideoRow): HelpVideo {
