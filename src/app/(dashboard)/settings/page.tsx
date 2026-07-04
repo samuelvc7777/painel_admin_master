@@ -15,9 +15,8 @@ import { IntegrationsSettingsCard } from "@/components/settings/operations/integ
 import { SystemSettingsCard } from "@/components/settings/operations/system-settings-card";
 import { SupportSettingsCard } from "@/components/settings/operations/support-settings-card";
 import { GoogleApiSettingsCard } from "@/components/settings/operations/google-api-settings-card";
-import { ReferralSettingsCard } from "@/components/settings/operations/referral-settings-card";
 import { idleFeedback, loadingFeedback } from "@/lib/services/settings/settings-feedback";
-import { loadCompanySettings, loadCurrentUser, loadPreferences, saveCompanyPhone, saveGoogleApiKey, savePreferences, saveReferralSettings, type ReferralSettings, type SettingsPreferences, type SettingsUser } from "@/lib/services/settings/settings-service";
+import { loadCompanySettings, loadCurrentUser, loadPreferences, saveCompanyPhone, saveGoogleApiKey, savePreferences, type SettingsPreferences, type SettingsUser } from "@/lib/services/settings/settings-service";
 import type { ActionFeedback } from "@/lib/services/settings/types";
 
 function toWhatsappUrl(phone: string) {
@@ -31,21 +30,11 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [companyPhone, setCompanyPhone] = useState("");
   const [googleApiKey, setGoogleApiKey] = useState("");
-  const [referralSettings, setReferralSettings] = useState<ReferralSettings>({
-    enabled: true,
-    showEntryPoint: true,
-    showRegisterInput: true,
-    rewardCents: 500,
-    minimumWithdrawalCents: 2500,
-    requiresPaidSubscription: true,
-  });
   const [preferences, setPreferences] = useState<SettingsPreferences>({ theme: "system", locale: "pt-BR", billingNotifications: true });
   const [profileFeedback, setProfileFeedback] = useState<ActionFeedback>(idleFeedback());
   const [googleApiFeedback, setGoogleApiFeedback] = useState<ActionFeedback>(idleFeedback());
-  const [referralFeedback, setReferralFeedback] = useState<ActionFeedback>(idleFeedback());
   const [preferencesFeedback, setPreferencesFeedback] = useState<ActionFeedback>(idleFeedback());
   const [savingGoogleApi, setSavingGoogleApi] = useState(false);
-  const [savingReferralSettings, setSavingReferralSettings] = useState(false);
 
   useEffect(() => {
     async function run() {
@@ -58,7 +47,6 @@ export default function SettingsPage() {
         setUser(me);
         setCompanyPhone(me.companyPhone ?? "");
         setGoogleApiKey(companySettings.googleApiKey ?? "");
-        setReferralSettings(companySettings.referralSettings);
         setPreferences(localPrefs);
       } finally {
         setLoading(false);
@@ -81,15 +69,6 @@ export default function SettingsPage() {
     const result = await saveGoogleApiKey(googleApiKey);
     setGoogleApiFeedback(result);
     setSavingGoogleApi(false);
-  }
-
-  async function handleSaveReferralSettings() {
-    if (savingReferralSettings) return;
-    setSavingReferralSettings(true);
-    setReferralFeedback(loadingFeedback());
-    const result = await saveReferralSettings(referralSettings);
-    setReferralFeedback(result);
-    setSavingReferralSettings(false);
   }
 
   function handleSavePreferences() {
@@ -141,13 +120,6 @@ export default function SettingsPage() {
             onSave={handleSaveGoogleApiKey}
             feedback={googleApiFeedback}
             saving={savingGoogleApi}
-          />
-          <ReferralSettingsCard
-            value={referralSettings}
-            onChange={setReferralSettings}
-            onSave={handleSaveReferralSettings}
-            feedback={referralFeedback}
-            saving={savingReferralSettings}
           />
           <div className="grid gap-4 md:grid-cols-3">
             <IntegrationsSettingsCard />

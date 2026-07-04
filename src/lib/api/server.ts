@@ -41,27 +41,6 @@ import {
   type RecentOperationalEvent,
 } from "@/lib/dashboard";
 import type { HelpVideo, Plan, Subscription, User } from "@/lib/subscriptions";
-import {
-  daysUntilUsersOps,
-  formatUsersOpsPercent,
-  getSubscriptionStatusBucket,
-  getUserActivitySnapshot,
-  getUserLifecycleStage,
-  isUsersOpsCommerciallyActive,
-  isUsersOpsNearRenewal,
-  mapPlanOptions,
-  normalizeUsersOpsFilters,
-  sortUsersOpsActionItems,
-  type UsersOperationsDashboard,
-  type UsersOpsActionItem,
-  type UsersOpsFilters,
-  type UsersOpsListItem,
-  type UsersOpsMetric,
-  type UsersOpsSectionState,
-  type UsersOpsSegment,
-  type UsersOpsTimelineEvent,
-  type UsersOpsTone,
-} from "@/lib/users-operations";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -644,20 +623,6 @@ function buildHelpVideoPayload(payload: Partial<HelpVideo>) {
   };
 }
 
-async function clearOtherFeaturedHelpVideos(currentVideoId: number) {
-  const supabase = createServerSupabase();
-  const { error } = await supabase
-    .from(TABLES.helpVideos)
-    .update({
-      is_featured: false,
-      updated_at: new Date().toISOString(),
-    })
-    .neq("id", currentVideoId)
-    .eq("is_featured", true);
-
-  assertNoError(error);
-}
-
 export async function listHelpVideos() {
   const supabase = createServerSupabase();
   const { data, error } = await supabase
@@ -673,37 +638,27 @@ export async function listHelpVideos() {
 
 export async function createHelpVideo(payload: Partial<HelpVideo>) {
   const supabase = createServerSupabase();
-  const normalizedPayload = buildHelpVideoPayload(payload);
   const { data, error } = await supabase
     .from(TABLES.helpVideos)
-    .insert(normalizedPayload)
+    .insert(buildHelpVideoPayload(payload))
     .select()
     .single();
 
   assertNoError(error);
-
-  if (normalizedPayload.is_featured) {
-    await clearOtherFeaturedHelpVideos((data as HelpVideoRow).id);
-  }
 
   return mapHelpVideo(data as HelpVideoRow);
 }
 
 export async function updateHelpVideo(id: number, payload: Partial<HelpVideo>) {
   const supabase = createServerSupabase();
-  const normalizedPayload = buildHelpVideoPayload(payload);
   const { data, error } = await supabase
     .from(TABLES.helpVideos)
-    .update(normalizedPayload)
+    .update(buildHelpVideoPayload(payload))
     .eq("id", id)
     .select()
     .single();
 
   assertNoError(error);
-
-  if (normalizedPayload.is_featured) {
-    await clearOtherFeaturedHelpVideos(id);
-  }
 
   return mapHelpVideo(data as HelpVideoRow);
 }
@@ -1278,471 +1233,6 @@ export async function getAdminBilling(input: Partial<Record<keyof BillingFilters
   };
 }
 
-type UsersOpsUserRecord = {
-  user: User;
-  subscriptionBucket: ReturnType<typeof getSubscriptionStatusBucket>;
-  lastActivityAt: string;
-  lastActivityLabel: string;
-};
-
-function buildUsersOpsMetric(metric: UsersOpsMetric): UsersOpsMetric {
-  return metric;
-}
-
-function matchesUsersOpsFilters(record: UsersOpsUserRecord, filters: UsersOpsFilters) {
-  const { user } = record;
-  const normalizedSearch = filters.search.toLowerCase();
-
-  if (filters.accessStatus === "active" && !user.isActive) {
-    return false;
-  }
-
-  if (filters.accessStatus === "blocked" && user.isActive) {
-    return false;
-  }
-
-  if (filters.subscriptionStatus !== "all" && record.subscriptionBucket !== filters.subscriptionStatus) {
-    return false;
-  }
-
-  if (filters.planId && user.activeSubscription?.plan.id !== filters.planId) {
-    return false;
-  }
-
-  if (normalizedSearch) {
-    const searchable = `${user.name} ${user.email} ${user.phone ?? ""} ${user.role}`.toLowerCase();
-    if (!searchable.includes(normalizedSearch)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function mapUsersOpsListItem(record: UsersOpsUserRecord): UsersOpsListItem {
-  const { user } = record;
-
-  return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    phone: user.phone ?? null,
-    role: user.role,
-    isActive: user.isActive,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
-    activePlanName: user.activeSubscription?.plan.name ?? null,
-    subscriptionStatus: user.activeSubscription?.status ?? null,
-    subscriptionEndsAt: user.activeSubscription?.endDate ?? null,
-    lifecycleStage: getUserLifecycleStage(user),
-    lastActivityAt: record.lastActivityAt,
-    lastActivityLabel: record.lastActivityLabel,
-    href: `/users/${user.id}`,
-  };
-}
-
-function buildUsersOpsSegments(records: UsersOpsUserRecord[], plans: Plan[]): UsersOpsSegment[] {
-  const countByPlan = new Map<number, number>();
-
-  for (const record of records) {
-    const planId = record.user.activeSubscription?.plan.id;
-    if (planId) {
-      countByPlan.set(planId, (countByPlan.get(planId) ?? 0) + 1);
-    }
-  }
-
-  const fixedSegments: UsersOpsSegment[] = [
-    {
-      id: "access-active",
-      type: "access",
-      label: "Acesso ativo",
-      value: records.filter((record) => record.user.isActive).length,
-      description: "Usuarios liberados para usar o app",
-      tone: "positive",
-      filters: { accessStatus: "active", page: 1 },
-    },
-    {
-      id: "access-blocked",
-      type: "access",
-      label: "Bloqueados",
-      value: records.filter((record) => !record.user.isActive).length,
-      description: "Contas sem acesso operacional",
-      tone: "danger",
-      filters: { accessStatus: "blocked", page: 1 },
-    },
-    {
-      id: "subscription-active",
-      type: "subscription",
-      label: "Pagantes",
-      value: records.filter((record) => record.subscriptionBucket === "active").length,
-      description: "Assinaturas pagas vigentes",
-      tone: "positive",
-      filters: { subscriptionStatus: "active", page: 1 },
-    },
-    {
-      id: "subscription-trial",
-      type: "subscription",
-      label: "Trials",
-      value: records.filter((record) => record.subscriptionBucket === "trial").length,
-      description: "Usuarios em periodo de avaliacao",
-      tone: "neutral",
-      filters: { subscriptionStatus: "trial", page: 1 },
-    },
-  ];
-
-  const planSegments = plans
-    .map((plan) => ({
-      id: `plan-${plan.id}`,
-      type: "plan" as const,
-      label: plan.name,
-      value: countByPlan.get(plan.id) ?? 0,
-      description: "Usuarios com este plano atual",
-      tone: "neutral" as UsersOpsTone,
-      filters: { planId: plan.id, page: 1 },
-    }))
-    .filter((segment) => segment.value > 0)
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 6);
-
-  return [...fixedSegments, ...planSegments];
-}
-
-function buildUsersOpsActionQueue(records: UsersOpsUserRecord[], filters: UsersOpsFilters, now: Date) {
-  const cutoff = new Date(now);
-  cutoff.setDate(cutoff.getDate() - filters.periodDays);
-
-  const items: UsersOpsActionItem[] = [];
-
-  for (const record of records) {
-    const { user } = record;
-    const activeSubscription = user.activeSubscription;
-
-    if (!user.isActive && isUsersOpsCommerciallyActive(activeSubscription, now)) {
-      items.push({
-        id: `blocked-active-subscription:${user.id}`,
-        type: "blocked_active_subscription",
-        title: "Assinante com acesso bloqueado",
-        description: `${user.name} possui assinatura comercial, mas o acesso esta bloqueado.`,
-        priority: "high",
-        relatedUserId: user.id,
-        relatedPlanName: activeSubscription?.plan.name ?? null,
-        occurredAt: user.updatedAt,
-        href: `/users/${user.id}`,
-        actionLabel: "Revisar acesso",
-      });
-    }
-
-    if (user.isActive && record.subscriptionBucket === "none") {
-      items.push({
-        id: `user-without-plan:${user.id}`,
-        type: "user_without_plan",
-        title: "Usuario ativo sem plano",
-        description: `${user.name} esta ativo, mas sem assinatura vigente.`,
-        priority: "medium",
-        relatedUserId: user.id,
-        relatedPlanName: null,
-        occurredAt: user.createdAt,
-        href: `/users/${user.id}`,
-        actionLabel: "Definir plano",
-      });
-    }
-
-    if (activeSubscription && isUsersOpsNearRenewal(activeSubscription, filters.renewalWindowDays, now)) {
-      const daysLeft = daysUntilUsersOps(activeSubscription.endDate, now);
-      items.push({
-        id: `renewal-due:${activeSubscription.id}`,
-        type: activeSubscription.status.toUpperCase() === "TRIAL" && daysLeft <= 3 ? "trial_ending" : "renewal_due",
-        title: daysLeft <= 2 ? "Vencimento critico" : "Assinatura vence em breve",
-        description: `${user.name} tem ${activeSubscription.plan.name} vencendo em ${daysLeft} dia${daysLeft === 1 ? "" : "s"}.`,
-        priority: daysLeft <= 2 ? "high" : "medium",
-        relatedUserId: user.id,
-        relatedPlanName: activeSubscription.plan.name,
-        occurredAt: activeSubscription.endDate,
-        href: `/users/${user.id}`,
-        actionLabel: "Abrir usuario",
-      });
-    }
-
-    for (const subscription of user.subscriptions) {
-      if (
-        subscription.canceledAt &&
-        isWithinPeriod(subscription.canceledAt, cutoff, now) &&
-        !isReplacementPlanChange(subscription, user.subscriptions)
-      ) {
-        items.push({
-          id: `recent-cancellation:${subscription.id}:${subscription.canceledAt}`,
-          type: "recent_cancellation",
-          title: "Cancelamento recente",
-          description: `${user.name} cancelou o plano ${subscription.plan.name}.`,
-          priority: "high",
-          relatedUserId: user.id,
-          relatedPlanName: subscription.plan.name,
-          occurredAt: subscription.canceledAt,
-          href: `/users/${user.id}`,
-          actionLabel: "Ver historico",
-        });
-      }
-    }
-  }
-
-  return sortUsersOpsActionItems(
-    Array.from(new Map(items.map((item) => [item.id, item])).values()),
-  ).slice(0, 10);
-}
-
-function buildUsersOpsSectionStates(
-  records: UsersOpsUserRecord[],
-  paginatedUsers: UsersOpsListItem[],
-  actionQueue: UsersOpsActionItem[],
-): UsersOpsSectionState[] {
-  return [
-    {
-      section: "summary",
-      status: records.length > 0 ? "ready" : "empty",
-      title: records.length > 0 ? "Resumo de usuarios" : "Sem usuarios no recorte",
-      message:
-        records.length > 0
-          ? "Indicadores calculados com os filtros atuais."
-          : "Ajuste filtros ou sincronize usuarios para montar a leitura operacional.",
-    },
-    {
-      section: "segments",
-      status: records.length > 0 ? "ready" : "empty",
-      title: records.length > 0 ? "Segmentos operacionais" : "Sem segmentos disponiveis",
-      message:
-        records.length > 0
-          ? "Segmentos usam o mesmo recorte da tela."
-          : "Os segmentos aparecem quando houver usuarios no recorte.",
-    },
-    {
-      section: "list",
-      status: paginatedUsers.length > 0 ? "ready" : "empty",
-      title: paginatedUsers.length > 0 ? "Lista operacional" : "Nenhum usuario encontrado",
-      message:
-        paginatedUsers.length > 0
-          ? "Usuarios ordenados por atividade recente."
-          : "Nenhum usuario atende aos filtros atuais.",
-      actionLabel: "Limpar filtros",
-      actionHref: "/users",
-    },
-    {
-      section: "actionQueue",
-      status: actionQueue.length > 0 ? "ready" : "empty",
-      title: actionQueue.length > 0 ? "Fila prioritaria" : "Operacao em dia",
-      message:
-        actionQueue.length > 0
-          ? "Itens ordenados por prioridade e data."
-          : "Nao ha usuarios exigindo acao imediata nesse recorte.",
-    },
-  ];
-}
-
-function buildUsersOpsTimeline(user: User): UsersOpsTimelineEvent[] {
-  const events: UsersOpsTimelineEvent[] = [
-    {
-      id: `user-created:${user.id}`,
-      type: "user_created",
-      title: "Usuario cadastrado",
-      description: `${user.name} entrou na base administrativa.`,
-      occurredAt: user.createdAt,
-      relatedPlanName: null,
-      tone: "neutral",
-    },
-  ];
-
-  if (user.updatedAt !== user.createdAt) {
-    events.push({
-      id: `access-updated:${user.id}:${user.updatedAt}`,
-      type: "access_updated",
-      title: user.isActive ? "Acesso ativo" : "Acesso bloqueado",
-      description: user.isActive ? "Conta liberada para uso." : "Conta bloqueada administrativamente.",
-      occurredAt: user.updatedAt,
-      relatedPlanName: null,
-      tone: user.isActive ? "positive" : "danger",
-    });
-  }
-
-  for (const subscription of user.subscriptions) {
-    const replacement = findReplacementSubscription(subscription, user.subscriptions);
-
-    if (replacement) {
-      events.push({
-        id: `plan-changed:${subscription.id}:${replacement.id}`,
-        type: "plan_changed",
-        title: "Troca de plano",
-        description: `${user.name} mudou de ${subscription.plan.name} para ${replacement.plan.name}.`,
-        occurredAt: replacement.createdAt,
-        relatedPlanName: `${subscription.plan.name} -> ${replacement.plan.name}`,
-        tone: "neutral",
-      });
-    } else {
-      events.push({
-        id: `subscription-created:${subscription.id}`,
-        type: "subscription_created",
-        title: subscription.status.toUpperCase() === "TRIAL" ? "Trial iniciado" : "Assinatura criada",
-        description: `${user.name} iniciou o plano ${subscription.plan.name}.`,
-        occurredAt: subscription.createdAt,
-        relatedPlanName: subscription.plan.name,
-        tone: subscription.status.toUpperCase() === "TRIAL" ? "neutral" : "positive",
-      });
-    }
-
-    if (subscription.canceledAt && !isReplacementPlanChange(subscription, user.subscriptions)) {
-      events.push({
-        id: `subscription-canceled:${subscription.id}:${subscription.canceledAt}`,
-        type: "subscription_canceled",
-        title: "Assinatura cancelada",
-        description: `${user.name} cancelou o plano ${subscription.plan.name}.`,
-        occurredAt: subscription.canceledAt,
-        relatedPlanName: subscription.plan.name,
-        tone: "danger",
-      });
-    }
-
-    if (
-      ["ACTIVE", "TRIAL"].includes(subscription.status.toUpperCase()) &&
-      subscription.updatedAt !== subscription.createdAt &&
-      Math.abs(new Date(subscription.updatedAt).getTime() - new Date(subscription.startDate).getTime()) < 60_000
-    ) {
-      events.push({
-        id: `subscription-renewed:${subscription.id}:${subscription.updatedAt}`,
-        type: "subscription_renewed",
-        title: "Assinatura renovada",
-        description: `${user.name} renovou o plano ${subscription.plan.name}.`,
-        occurredAt: subscription.updatedAt,
-        relatedPlanName: subscription.plan.name,
-        tone: "positive",
-      });
-    }
-  }
-
-  return Array.from(new Map(events.map((event) => [event.id, event])).values())
-    .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime())
-    .slice(0, 20);
-}
-
-export async function getUsersOperations(input: Partial<Record<keyof UsersOpsFilters, unknown>> = {}): Promise<UsersOperationsDashboard> {
-  const filters = normalizeUsersOpsFilters(input);
-  const [users, plans] = await Promise.all([listUsers(), listPlans()]);
-  const now = new Date();
-  const cutoff = new Date(now);
-  cutoff.setDate(cutoff.getDate() - filters.periodDays);
-
-  const allRecords = users.map((user) => {
-    const activity = getUserActivitySnapshot(user, now);
-
-    return {
-      user,
-      subscriptionBucket: getSubscriptionStatusBucket(user.activeSubscription, now),
-      lastActivityAt: activity.lastActivityAt,
-      lastActivityLabel: activity.lastActivityLabel,
-    } satisfies UsersOpsUserRecord;
-  });
-
-  const filteredRecords = allRecords
-    .filter((record) => matchesUsersOpsFilters(record, filters))
-    .sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime());
-
-  const activeUsers = filteredRecords.filter((record) => record.user.isActive);
-  const newUsers = filteredRecords.filter((record) => isWithinPeriod(record.user.createdAt, cutoff, now));
-  const recentCancellations = filteredRecords.filter((record) =>
-    record.user.subscriptions.some((subscription) =>
-      isWithinPeriod(subscription.canceledAt, cutoff, now) &&
-      !isReplacementPlanChange(subscription, record.user.subscriptions),
-    ),
-  );
-  const usersWithTrialInPeriod = filteredRecords.filter((record) =>
-    record.user.subscriptions.some((subscription) =>
-      subscription.status.toUpperCase() === "TRIAL" && isWithinPeriod(subscription.createdAt, cutoff, now),
-    ),
-  );
-  const paidAfterTrial = usersWithTrialInPeriod.filter((record) =>
-    record.user.subscriptions.some((subscription) => subscription.status.toUpperCase() === "ACTIVE"),
-  );
-  const conversionRate =
-    usersWithTrialInPeriod.length > 0 ? (paidAfterTrial.length / usersWithTrialInPeriod.length) * 100 : null;
-
-  const summary: UsersOpsMetric[] = [
-    buildUsersOpsMetric({
-      id: "active_users",
-      label: "Usuarios ativos",
-      value: activeUsers.length,
-      formattedValue: activeUsers.length.toLocaleString("pt-BR"),
-      description: filteredRecords.length > 0 ? `${formatUsersOpsPercent((activeUsers.length / filteredRecords.length) * 100)} da base filtrada` : "Sem base no recorte",
-      periodLabel: "Agora",
-      tone: activeUsers.length > 0 ? "positive" : "warning",
-    }),
-    buildUsersOpsMetric({
-      id: "new_users",
-      label: "Novos usuarios",
-      value: newUsers.length,
-      formattedValue: newUsers.length.toLocaleString("pt-BR"),
-      description: "Cadastros dentro do periodo selecionado",
-      periodLabel: `${filters.periodDays} dias`,
-      tone: newUsers.length > 0 ? "positive" : "neutral",
-    }),
-    buildUsersOpsMetric({
-      id: "recent_cancellations",
-      label: "Cancelados recentes",
-      value: recentCancellations.length,
-      formattedValue: recentCancellations.length.toLocaleString("pt-BR"),
-      description: "Cancelamentos reais, sem trocas tecnicas de plano",
-      periodLabel: `${filters.periodDays} dias`,
-      tone: recentCancellations.length > 0 ? "danger" : "positive",
-    }),
-    buildUsersOpsMetric({
-      id: "trial_to_paid_conversion",
-      label: "Trial para pago",
-      value: Math.round(conversionRate ?? 0),
-      formattedValue: formatUsersOpsPercent(conversionRate),
-      description: `${paidAfterTrial.length} de ${usersWithTrialInPeriod.length} trials viraram assinatura paga`,
-      periodLabel: `${filters.periodDays} dias`,
-      tone: conversionRate === null ? "neutral" : conversionRate >= 40 ? "positive" : "warning",
-    }),
-  ];
-
-  const startIndex = (filters.page - 1) * filters.limit;
-  const paginatedUsers = filteredRecords.slice(startIndex, startIndex + filters.limit).map(mapUsersOpsListItem);
-  const actionQueue = buildUsersOpsActionQueue(filteredRecords, filters, now);
-
-  return {
-    generatedAt: now.toISOString(),
-    filters,
-    availablePlans: mapPlanOptions(plans),
-    summary,
-    segments: buildUsersOpsSegments(filteredRecords, plans),
-    users: paginatedUsers,
-    actionQueue,
-    pagination: {
-      total: filteredRecords.length,
-      page: filters.page,
-      limit: filters.limit,
-      totalPages: Math.max(1, Math.ceil(filteredRecords.length / filters.limit)),
-    },
-    sectionStates: buildUsersOpsSectionStates(filteredRecords, paginatedUsers, actionQueue),
-  };
-}
-
-export async function getUserOperationsTimeline(userId: number) {
-  const user = await getUserById(userId);
-  const events = buildUsersOpsTimeline(user);
-
-  return {
-    userId,
-    generatedAt: new Date().toISOString(),
-    events,
-    sectionState: {
-      section: "timeline",
-      status: events.length > 0 ? "ready" : "empty",
-      title: events.length > 0 ? "Timeline operacional" : "Sem eventos operacionais",
-      message:
-        events.length > 0
-          ? "Eventos relevantes derivados de cadastro, acesso e assinaturas."
-          : "Cadastros, assinaturas, cancelamentos e renovacoes aparecem aqui quando existirem.",
-    } satisfies UsersOpsSectionState,
-  };
-}
-
 function buildPlanDistribution(users: User[]): PlanDistributionItem[] {
   const activeSubscribers = users.filter((user) =>
     user.isActive && isCommerciallyActiveSubscription(user.activeSubscription) && user.activeSubscription?.plan,
@@ -2039,46 +1529,8 @@ export type CompanySettings = {
   id: number;
   supportPhone: string | null;
   googleApiKey: string | null;
-  referralSettings: ReferralSettings;
   updatedAt?: string;
 };
-
-export type ReferralSettings = {
-  enabled: boolean;
-  showEntryPoint: boolean;
-  showRegisterInput: boolean;
-  rewardCents: number;
-  minimumWithdrawalCents: number;
-  requiresPaidSubscription: boolean;
-};
-
-const defaultReferralSettings: ReferralSettings = {
-  enabled: true,
-  showEntryPoint: true,
-  showRegisterInput: true,
-  rewardCents: 500,
-  minimumWithdrawalCents: 2500,
-  requiresPaidSubscription: true,
-};
-
-function normalizeReferralSettings(value: unknown): ReferralSettings {
-  const source = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
-
-  return {
-    enabled: typeof source.enabled === "boolean" ? source.enabled : defaultReferralSettings.enabled,
-    showEntryPoint: typeof source.showEntryPoint === "boolean" ? source.showEntryPoint : defaultReferralSettings.showEntryPoint,
-    showRegisterInput: typeof source.showRegisterInput === "boolean" ? source.showRegisterInput : defaultReferralSettings.showRegisterInput,
-    rewardCents: normalizePositiveInt(source.rewardCents, defaultReferralSettings.rewardCents),
-    minimumWithdrawalCents: normalizePositiveInt(source.minimumWithdrawalCents, defaultReferralSettings.minimumWithdrawalCents),
-    requiresPaidSubscription: typeof source.requiresPaidSubscription === "boolean" ? source.requiresPaidSubscription : defaultReferralSettings.requiresPaidSubscription,
-  };
-}
-
-function normalizePositiveInt(value: unknown, fallback: number) {
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return Math.round(parsed);
-}
 
 export async function getCompanySettings() {
   const supabase = createServerSupabase();
@@ -2096,7 +1548,6 @@ export async function getCompanySettings() {
       id: 1,
       supportPhone: null,
       googleApiKey: null,
-      referralSettings: defaultReferralSettings,
     } satisfies CompanySettings;
   }
 
@@ -2110,46 +1561,30 @@ export async function getCompanySettings() {
     return {
       ...(baseResult.data as Omit<CompanySettings, "googleApiKey">),
       googleApiKey: null,
-      referralSettings: defaultReferralSettings,
     };
   }
 
   assertNoError(googleApiResult.error);
 
-  const referralSettingsResult = await supabase
-    .from(TABLES.company)
-    .select("referralSettings")
-    .eq("id", 1)
-    .maybeSingle();
-
   return {
     ...(baseResult.data as Omit<CompanySettings, "googleApiKey">),
     googleApiKey: (googleApiResult.data as Pick<CompanySettings, "googleApiKey"> | null)?.googleApiKey ?? null,
-    referralSettings: normalizeReferralSettings(
-      (referralSettingsResult.data as Pick<CompanySettings, "referralSettings"> | null)?.referralSettings,
-    ),
   };
 }
 
 export async function updateCompanySettings(payload: Partial<CompanySettings>) {
   const supabase = createServerSupabase();
-  const updatePayload: Record<string, unknown> = {
-    id: 1,
-    updatedAt: new Date().toISOString(),
-  };
-
-  if ("googleApiKey" in payload) {
-    updatePayload.googleApiKey = payload.googleApiKey;
-  }
-
-  if ("referralSettings" in payload) {
-    updatePayload.referralSettings = normalizeReferralSettings(payload.referralSettings);
-  }
-
   const { data, error } = await supabase
     .from(TABLES.company)
-    .upsert(updatePayload, { onConflict: "id" })
-    .select("id,supportPhone,googleApiKey,referralSettings,updatedAt")
+    .upsert(
+      {
+        id: 1,
+        googleApiKey: payload.googleApiKey,
+        updatedAt: new Date().toISOString(),
+      },
+      { onConflict: "id" },
+    )
+    .select("id,supportPhone,googleApiKey,updatedAt")
     .single();
 
   if (isMissingGoogleApiKeyColumn(error)) {
@@ -2157,9 +1592,5 @@ export async function updateCompanySettings(payload: Partial<CompanySettings>) {
   }
 
   assertNoError(error);
-  const settings = data as CompanySettings;
-  return {
-    ...settings,
-    referralSettings: normalizeReferralSettings(settings.referralSettings),
-  } satisfies CompanySettings;
+  return data as CompanySettings;
 }

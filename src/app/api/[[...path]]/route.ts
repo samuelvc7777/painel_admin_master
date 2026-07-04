@@ -11,9 +11,7 @@ import {
   getAdminBilling,
   getDashboard,
   getCompanySettings,
-  getUserOperationsTimeline,
   getUserById,
-  getUsersOperations,
   listAdminNotifications,
   listHelpVideos,
   listPlans,
@@ -80,30 +78,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
       } catch (error) {
         return jsonError(error, 400);
       }
-    }
-
-    if (endpoint === "/admin/users/operations") {
-      try {
-        return NextResponse.json(
-          await getUsersOperations({
-            periodDays: request.nextUrl.searchParams.get("periodDays"),
-            renewalWindowDays: request.nextUrl.searchParams.get("renewalWindowDays"),
-            planId: request.nextUrl.searchParams.get("planId"),
-            accessStatus: request.nextUrl.searchParams.get("accessStatus"),
-            subscriptionStatus: request.nextUrl.searchParams.get("subscriptionStatus"),
-            search: request.nextUrl.searchParams.get("search"),
-            page: request.nextUrl.searchParams.get("page"),
-            limit: request.nextUrl.searchParams.get("limit"),
-          }),
-        );
-      } catch (error) {
-        return jsonError(error, 400);
-      }
-    }
-
-    const userTimelineMatch = endpoint.match(/^\/admin\/users\/(\d+)\/timeline$/);
-    if (userTimelineMatch) {
-      return NextResponse.json(await getUserOperationsTimeline(Number(userTimelineMatch[1])));
     }
 
     if (endpoint === "/admin/plans") {
@@ -195,26 +169,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     if (endpoint === "/admin/company-settings") {
-      const updatePayload: Record<string, unknown> = {};
-
-      if ("googleApiKey" in payload) {
-        const rawGoogleApiKey = String(payload.googleApiKey ?? "");
-        const googleApiKey = rawGoogleApiKey.trim();
-        if (!googleApiKey) {
-          throw new Error("Informe uma API Google valida.");
-        }
-        updatePayload.googleApiKey = googleApiKey;
+      const rawGoogleApiKey = String(payload.googleApiKey ?? "");
+      const googleApiKey = rawGoogleApiKey.trim();
+      if (!googleApiKey) {
+        throw new Error("Informe uma API Google valida.");
       }
 
-      if ("referralSettings" in payload) {
-        updatePayload.referralSettings = payload.referralSettings;
-      }
-
-      if (Object.keys(updatePayload).length === 0) {
-        throw new Error("Nenhuma configuracao informada.");
-      }
-
-      return NextResponse.json(await updateCompanySettings(updatePayload));
+      return NextResponse.json(
+        await updateCompanySettings({
+          googleApiKey,
+        }),
+      );
     }
 
     return jsonError(new Error(`Endpoint nao mapeado: PATCH ${endpoint}`), 404);

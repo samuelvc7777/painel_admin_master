@@ -16,16 +16,6 @@ export interface CompanySettings {
   id: number;
   supportPhone?: string | null;
   googleApiKey?: string | null;
-  referralSettings: ReferralSettings;
-}
-
-export interface ReferralSettings {
-  enabled: boolean;
-  showEntryPoint: boolean;
-  showRegisterInput: boolean;
-  rewardCents: number;
-  minimumWithdrawalCents: number;
-  requiresPaidSubscription: boolean;
 }
 
 export interface SettingsPreferences {
@@ -68,26 +58,6 @@ export async function saveGoogleApiKey(googleApiKey: string): Promise<ActionFeed
     return successFeedback("API Google salva com sucesso.");
   } catch (error) {
     return errorFeedback(error instanceof Error ? error.message : "Erro ao salvar API Google.");
-  }
-}
-
-export async function saveReferralSettings(settings: ReferralSettings): Promise<ActionFeedback> {
-  if (settings.rewardCents < 0) {
-    return errorFeedback("Informe um bonus por indicacao valido.");
-  }
-
-  if (settings.minimumWithdrawalCents < 1) {
-    return errorFeedback("Informe um saque minimo valido.");
-  }
-
-  try {
-    await fetchApi("/admin/company-settings", {
-      method: "PATCH",
-      body: JSON.stringify({ referralSettings: settings }),
-    });
-    return successFeedback("Configuracoes de indicacao salvas com sucesso.");
-  } catch (error) {
-    return errorFeedback(error instanceof Error ? error.message : "Erro ao salvar indicacoes.");
   }
 }
 

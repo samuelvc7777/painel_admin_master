@@ -17,20 +17,11 @@ import {
   Gem,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api/client';
-import { UsersTimeline } from '@/components/users';
 import { mapUserToListItem, type Plan, type User, type UserListItem } from '@/lib/subscriptions';
-import type { UsersOpsSectionState, UsersOpsTimelineEvent } from '@/lib/users-operations';
 
 interface SubscriptionFeedback {
   type: 'success' | 'error';
   message: string;
-}
-
-interface UserTimelineResponse {
-  userId: number;
-  generatedAt: string;
-  events: UsersOpsTimelineEvent[];
-  sectionState: UsersOpsSectionState;
 }
 
 export default function UserEditPage() {
@@ -43,8 +34,6 @@ export default function UserEditPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubscriptionSubmitting, setIsSubscriptionSubmitting] = useState(false);
   const [editingUser, setEditingUser] = useState<UserListItem | null>(null);
-  const [timelineEvents, setTimelineEvents] = useState<UsersOpsTimelineEvent[]>([]);
-  const [timelineState, setTimelineState] = useState<UsersOpsSectionState | undefined>();
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [subscriptionFeedback, setSubscriptionFeedback] = useState<SubscriptionFeedback | null>(null);
   const [formData, setFormData] = useState({
@@ -73,15 +62,11 @@ export default function UserEditPage() {
         fetchApi(`/user/${userId}`),
         fetchApi('/admin/plans').catch(() => []),
       ]);
-      const timelineResponse = await fetchApi(`/admin/users/${userId}/timeline`).catch(() => null);
 
       const userData = (Array.isArray(userResponse) ? userResponse[0] : userResponse) as User;
       const mappedUser = mapUserToListItem(userData);
-      const timelineData = timelineResponse as UserTimelineResponse | null;
 
       setEditingUser(mappedUser);
-      setTimelineEvents(timelineData?.events ?? []);
-      setTimelineState(timelineData?.sectionState);
       setPlans(plansResponse as Plan[]);
       setSelectedPlanId(mappedUser.activePlan ? String(mappedUser.activePlan.id) : '');
       setFormData({
@@ -393,8 +378,6 @@ export default function UserEditPage() {
           </div>
         </aside>
       </div>
-
-      <UsersTimeline events={timelineEvents} state={timelineState} />
     </div>
   );
 }
