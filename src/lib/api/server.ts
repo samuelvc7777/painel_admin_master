@@ -623,6 +623,20 @@ function buildHelpVideoPayload(payload: Partial<HelpVideo>) {
   };
 }
 
+async function clearOtherFeaturedHelpVideos(currentVideoId: number) {
+  const supabase = createServerSupabase();
+  const { error } = await supabase
+    .from(TABLES.helpVideos)
+    .update({
+      is_featured: false,
+      updated_at: new Date().toISOString(),
+    })
+    .neq("id", currentVideoId)
+    .eq("is_featured", true);
+
+  assertNoError(error);
+}
+
 export async function listHelpVideos() {
   const supabase = createServerSupabase();
   const { data, error } = await supabase
@@ -638,27 +652,37 @@ export async function listHelpVideos() {
 
 export async function createHelpVideo(payload: Partial<HelpVideo>) {
   const supabase = createServerSupabase();
+  const normalizedPayload = buildHelpVideoPayload(payload);
   const { data, error } = await supabase
     .from(TABLES.helpVideos)
-    .insert(buildHelpVideoPayload(payload))
+    .insert(normalizedPayload)
     .select()
     .single();
 
   assertNoError(error);
+
+  if (normalizedPayload.is_featured) {
+    await clearOtherFeaturedHelpVideos((data as HelpVideoRow).id);
+  }
 
   return mapHelpVideo(data as HelpVideoRow);
 }
 
 export async function updateHelpVideo(id: number, payload: Partial<HelpVideo>) {
   const supabase = createServerSupabase();
+  const normalizedPayload = buildHelpVideoPayload(payload);
   const { data, error } = await supabase
     .from(TABLES.helpVideos)
-    .update(buildHelpVideoPayload(payload))
+    .update(normalizedPayload)
     .eq("id", id)
     .select()
     .single();
 
   assertNoError(error);
+
+  if (normalizedPayload.is_featured) {
+    await clearOtherFeaturedHelpVideos(id);
+  }
 
   return mapHelpVideo(data as HelpVideoRow);
 }
