@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Edit2,
   Loader2,
+  PlayCircle,
   Plus,
   Save,
   Trash2,
@@ -282,7 +283,7 @@ function VideoForm({
         {form.id ? 'Editar video' : 'Adicionar video'}
       </h1>
       <p className="mt-3 text-sm font-medium text-slate-400">
-        Informe nome, descricao e link. Thumbnail e identificador do YouTube sao derivados automaticamente.
+        Informe nome, descricao e link. Marque um video como demonstrativo para ele aparecer no app mobile e no banner de assinatura.
       </p>
 
       <form
@@ -334,7 +335,8 @@ function VideoForm({
               onChange={(checked) => onChange((current) => ({ ...current, isActive: checked }))}
             />
             <CheckTile
-              label="Destaque"
+              label="Usar como video demonstrativo"
+              description="Aparece em Ajustes e no banner para usuarios sem assinatura."
               checked={form.isFeatured}
               onChange={(checked) => onChange((current) => ({ ...current, isFeatured: checked }))}
             />
@@ -382,7 +384,7 @@ function VideoLibrary({
         <div>
           <h1 className="text-3xl font-black tracking-tight text-white">Videos</h1>
           <p className="mt-3 text-sm font-medium text-slate-400">
-            Gerencie os videos exibidos na tela de Ajuda do app.
+            Gerencie os videos exibidos na tela de Ajuda e escolha o video demonstrativo do banner de assinatura.
           </p>
         </div>
         <button
@@ -433,7 +435,7 @@ function VideoLibrary({
                     </span>
                     {video.isFeatured && (
                       <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-amber-400">
-                        Destaque
+                        Demonstrativo
                       </span>
                     )}
                   </div>
@@ -478,10 +480,12 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function CheckTile({
   label,
+  description,
   checked,
   onChange,
 }: {
   label: string;
+  description?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) {
@@ -498,7 +502,15 @@ function CheckTile({
       >
         ✓
       </span>
-      <span className="text-sm font-black text-white">{label}</span>
+      <span className="min-w-0">
+        <span className="flex items-center gap-2 text-sm font-black text-white">
+          {description ? <PlayCircle className="h-4 w-4 text-amber-300" /> : null}
+          {label}
+        </span>
+        {description ? (
+          <span className="mt-1 block text-xs font-semibold leading-5 text-slate-400">{description}</span>
+        ) : null}
+      </span>
     </button>
   );
 }
